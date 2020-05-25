@@ -1,0 +1,229 @@
+﻿<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>Front End Challenge</title>
+  <meta name="description" content="Swim lanes for reward company" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Copyright 1998-2020 by Northwoods Software Corporation. -->
+
+  <script src="./release/go.js"></script>
+  <script id="code">
+    var MINLENGTH = 300;
+    var BREADTH = 150;
+
+    function relayoutDiagram() {
+      rewardsDiagram.selection.each(function (n) { n.invalidateLayout(); });
+      rewardsDiagram.layoutDiagram();
+    }
+
+    function computeMinPoolSize() {
+      var len = MINLENGTH;
+      rewardsDiagram.findTopLevelGroups().each(function (lane) {
+        var holder = lane.placeholder;
+        if (holder !== null) {
+          var sz = holder.actualBounds;
+          len = Math.max(len, sz.height);
+        }
+      });
+      return new go.Size(NaN, len);
+    }
+
+    function PoolLayout() {
+      go.GridLayout.call(this);
+      this.cellSize = new go.Size(1, 1);
+      this.wrappingColumn = Infinity;
+      this.wrappingWidth = Infinity;
+      this.spacing = new go.Size(0, 0);
+      this.alignment = go.GridLayout.Position;
+    }
+    go.Diagram.inherit(PoolLayout, go.GridLayout);
+
+    PoolLayout.prototype.doLayout = function (coll) {
+      var diagram = this.diagram;
+      if (diagram === null) return;
+      diagram.startTransaction("PoolLayout");
+      var minsize = computeMinPoolSize();
+      diagram.findTopLevelGroups().each(function (lane) {
+        if (!(lane instanceof go.Group)) return;
+        var shape = lane.selectionObject;
+        if (shape !== null) {
+          shape.width = BREADTH
+          shape.height = minsize.height;
+          var cell = lane.resizeCellSize;
+          if (!isNaN(shape.height) && !isNaN(cell.height) && cell.height > 0) shape.height = Math.ceil(shape.height / cell.height) * cell.height;
+        }
+      });
+      go.GridLayout.prototype.doLayout.call(this, coll);
+      diagram.commitTransaction("PoolLayout");
+    };
+
+    function init() {
+      var $ = go.GraphObject.make;
+
+      rewardsDiagram =
+        $(go.Diagram, "rewardsDiagramDiv",
+          {
+            contentAlignment: go.Spot.TopCenter,
+            layout: $(PoolLayout),
+            mouseDrop: function (e) {
+              e.diagram.currentTool.doCancel();
+            },
+            "commandHandler.copiesGroupKey": false,
+            "SelectionMoved": relayoutDiagram,
+            "SelectionCopied": relayoutDiagram,
+            "animationManager.isEnabled": false,
+            "undoManager.isEnabled": true
+          });
+
+      rewardsDiagram.toolManager.draggingTool.doActivate = function () {
+        go.DraggingTool.prototype.doActivate.call(this);
+        this.currentPart.layerName = "Foreground";
+      }
+      rewardsDiagram.toolManager.draggingTool.doDeactivate = function () {
+        this.currentPart.layerName = "";
+        go.DraggingTool.prototype.doDeactivate.call(this);
+      }
+
+      rewardsDiagram.nodeTemplate =
+        $(go.Node, "Horizontal",
+          new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+          $(go.Panel, "Auto",
+            $(go.Shape, "Rectangle", { fill: "white" }),
+            $(go.Panel, "Table",
+              { width: 130, minSize: new go.Size(NaN, 50) },
+              $(go.TextBlock,
+                {
+                  name: 'TEXT',
+                  alignment: go.Spot.Center
+                },
+                new go.Binding("text", "key").makeTwoWay())
+            )
+          )
+        );
+
+      rewardsDiagram.nodeTemplateMap.add("deleteCross",
+        $(go.Node, "Horizontal",
+          new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+          $(go.Panel, "Auto",
+            $(go.Shape, "Rectangle", { fill: "white" }),
+            $(go.Panel, "Table",
+              { width: 130, minSize: new go.Size(NaN, 50) },
+              $(go.TextBlock,
+                {
+                  name: 'TEXT',
+                  alignment: go.Spot.Center
+                },
+                new go.Binding("text", "key").makeTwoWay())
+            ),
+            $("Button",
+              { alignment: go.Spot.TopRight },
+              {
+                click: function (e, obj) {
+                  rewardsDiagram.removeParts([obj.part]);
+                }
+              },
+              $(go.TextBlock, "x"))
+          )
+        )
+      );
+
+      rewardsDiagram.groupTemplate =
+        $(go.Group, "Vertical",
+          {
+            selectable: false,
+            selectionObjectName: "SHAPE",
+            layerName: "Background",
+            layout:
+              $(go.GridLayout,
+                {
+                  wrappingColumn: 1,
+                  comparer: function (a, b) {
+                    var ay = a.location.y;
+                    var by = b.location.y;
+                    if (isNaN(ay) || isNaN(by)) return 0;
+                    if (ay < by) return -1;
+                    if (ay > by) return 1;
+                    return 0;
+                  }
+                }
+              ),
+            click: function (e, grp) {
+              if (!e.shift && !e.control && !e.meta) e.diagram.clearSelection();
+            },
+            computesBoundsAfterDrag: true,
+            handlesDragDropForMembers: true,
+            mouseDrop: function (e, grp) {
+              if (e.diagram.selection.all(function (n) { return !(n instanceof go.Group); })) {
+                var ok = grp.addMembers(grp.diagram.selection, true);
+                if (!ok) grp.diagram.currentTool.doCancel();
+              }
+            },
+          },
+          new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+          $(go.Panel, "Horizontal",
+            $(go.TextBlock,
+              new go.Binding("text", "text").makeTwoWay())
+          ),
+          $(go.Panel, "Auto",
+            $(go.Shape, "Rectangle",
+              { name: "SHAPE", fill: "white" },
+              new go.Binding("desiredSize", "size", go.Size.parse).makeTwoWay(go.Size.stringify)),
+            $(go.Placeholder,
+              { padding: 3, alignment: go.Spot.TopCenter }),
+          ));
+
+      load();
+
+      rewardsPalette =
+        $(go.Palette, "rewardsPalette",
+          {
+            nodeTemplateMap: rewardsDiagram.nodeTemplateMap,
+            groupTemplate: rewardsDiagram.groupTemplate
+          });
+
+      rewardsPalette.model.nodeDataArray = [
+        { key: "R1", text: "R1" },
+        { key: "R2", text: "R2" },
+        { key: "R3", text: "R3" },
+        { key: "R4", text: "R4", category: "deleteCross" },
+        { key: "R5", text: "R5" }
+      ];
+    }
+
+    function load() {
+      rewardsDiagram.model.nodeDataArray = [
+        { "key": "C1", "text": "C1", "isGroup": true },
+        { "key": "C2", "text": "C2", "isGroup": true },
+        { "key": "C3", "text": "C3", "isGroup": true },
+        { "key": "C4", "text": "C4", "isGroup": true },
+        { "key": "C5", "text": "C5", "isGroup": true }
+      ]
+    }
+  </script>
+</head>
+
+<body onload="init()">
+  <div id="sample">
+    <div style="display: flex; flex-direction: row; width: 100%; justify-content: center;">
+      <div>
+        <h4 style="text-align: center;">Rewards</h4>
+        <br>
+        <div id="rewardsPalette" style="width:150px; height: 360px;"></div>
+      </div>
+      <div>
+        <h4 style="text-align: center;">Categories</h4>
+        <div id="rewardsDiagramDiv" style="width: 800px; height: 360px;"></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: row; justify-content: center;">
+      <input type="button" onclick="rewardsDiagram.commandHandler.undo()" style="height:20px; font-size: 11px;"
+        value="Undo">
+      <input type="button" onclick="rewardsDiagram.commandHandler.redo()" style="height:20px; font-size: 11px;"
+        value="Redo">
+    </div>
+  </div>
+</body>
+
+</html>
